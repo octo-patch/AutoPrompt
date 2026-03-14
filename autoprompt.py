@@ -20,6 +20,8 @@ import subprocess
 import tempfile
 import time
 import argparse
+import urllib.request
+import urllib.error
 from pathlib import Path
 
 def read(path):
@@ -45,6 +47,33 @@ def llm(prompt, engine="claude", reasoning="medium", model=None):
         if result.returncode != 0:
             raise RuntimeError(f"codex error: {result.stderr[:200]}")
         return result.stdout.strip()
+    elif engine == "minimax":
+        api_key = os.environ.get("MINIMAX_API_KEY")
+        if not api_key:
+            raise RuntimeError("MINIMAX_API_KEY environment variable is required for minimax engine")
+        m = model or "MiniMax-M2.5"
+        body = json.dumps({
+            "model": m,
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0.7,
+        }).encode()
+        req = urllib.request.Request(
+            "https://api.minimax.io/v1/chat/completions",
+            data=body,
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {api_key}",
+            },
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=300) as resp:
+                data = json.loads(resp.read().decode())
+            return data["choices"][0]["message"]["content"].strip()
+        except urllib.error.HTTPError as e:
+            err_body = e.read().decode()[:200] if e.fp else str(e)
+            raise RuntimeError(f"minimax API error ({e.code}): {err_body}")
+        except urllib.error.URLError as e:
+            raise RuntimeError(f"minimax connection error: {e.reason}")
     elif engine == "ollama":
         m = model or "qwen3.5:9b"
         result = subprocess.run(
@@ -60,7 +89,7 @@ def llm(prompt, engine="claude", reasoning="medium", model=None):
         out = re.sub(r'```(?:json)?\s*', '', out).strip()
         return out
     else:
-        raise ValueError(f"Unknown engine: {engine}. Use: claude, codex, ollama")
+        raise ValueError(f"Unknown engine: {engine}. Use: claude, codex, ollama, minimax")
 
 def extract_json(text):
     """Extract JSON from LLM response (handles markdown fences etc)."""
@@ -182,7 +211,12 @@ def evolve(seed_path, criteria_path, generations=10, population=3, bench_cmd=Non
     print(f"{'='*60}")
     print(f"  seed:        {seed_path}")
     print(f"  criteria:    {criteria_path}")
-    engine_str = engine if engine != "ollama" else f"ollama ({model or 'qwen3.5:9b'})"
+    if engine == "ollama":
+        engine_str = f"ollama ({model or 'qwen3.5:9b'})"
+    elif engine == "minimax":
+        engine_str = f"minimax ({model or 'MiniMax-M2.5'})"
+    else:
+        engine_str = engine
     print(f"  engine:      {engine_str}")
     print(f"  generations: {generations} max")
     print(f"  population:  {population}/gen")
@@ -312,6 +346,12 @@ examples:
 
   # use a small local model for fast iteration
   python3 autoprompt.py prompt.txt criteria.md -e ollama -m qwen3.5:2b -g 5
+
+  # use MiniMax cloud API (set MINIMAX_API_KEY env var)
+  MINIMAX_API_KEY=your-key python3 autoprompt.py prompt.txt criteria.md -e minimax
+
+  # use MiniMax high-speed model
+  python3 autoprompt.py prompt.txt criteria.md -e minimax -m MiniMax-M2.5-highspeed
 """
     )
     p.add_argument("seed", help="path to the seed file to evolve")
@@ -319,10 +359,10 @@ examples:
     p.add_argument("-g", "--generations", type=int, default=10, help="max generations (default: 10)")
     p.add_argument("-n", "--population", type=int, default=3, help="mutations per generation (default: 3)")
     p.add_argument("-b", "--bench", type=str, default=None, help="benchmark command ({file} = temp file path)")
-    p.add_argument("-e", "--engine", type=str, default="claude", choices=["claude", "codex", "ollama"],
-                   help="LLM engine: claude, codex, or ollama (default: claude)")
+    p.add_argument("-e", "--engine", type=str, default="claude", choices=["claude", "codex", "ollama", "minimax"],
+                   help="LLM engine: claude, codex, ollama, or minimax (default: claude)")
     p.add_argument("-m", "--model", type=str, default=None,
-                   help="model name for ollama (default: qwen3.5:9b). ignored for claude/codex")
+                   help="model name for ollama or minimax (default: qwen3.5:9b / MiniMax-M2.5)")
     # stopping conditions
     p.add_argument("--target", type=float, default=None, help="stop when score reaches this value")
     p.add_argument("--patience", type=int, default=None, help="stop after N generations with no improvement")
