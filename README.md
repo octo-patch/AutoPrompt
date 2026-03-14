@@ -28,13 +28,14 @@ Works on **anything text-based** — prompts, code, configs, copy, schemas — i
 
 ### Prerequisites
 
-You need one of these CLI tools installed:
+You need one of these LLM backends:
 
 - [**Claude Code**](https://docs.anthropic.com/en/docs/claude-code) — `claude` CLI
 - [**Codex**](https://github.com/openai/codex) — `codex` CLI
 - [**Ollama**](https://ollama.com/) — run local models (Qwen, Llama, Mistral, etc.)
+- [**MiniMax**](https://www.minimax.io/) — cloud API with 204K context (`MINIMAX_API_KEY` env var)
 
-No API keys needed. No pip install. Just Python 3.10+ and an LLM.
+No pip install. Just Python 3.10+ and an LLM.
 
 ### Run it
 
@@ -74,6 +75,24 @@ python3 autoprompt.py seed.txt criteria.md -e ollama -m qwen2.5-coder:14b
 ```
 
 Fully offline. No API keys. No tokens. Just your GPU.
+
+### ☁️ Run with MiniMax cloud API
+
+```bash
+export MINIMAX_API_KEY=your-api-key
+
+# use MiniMax-M2.5 (default, 204K context)
+python3 autoprompt.py examples/prompt-optimizer/seed.txt \
+  examples/prompt-optimizer/criteria.md \
+  -e minimax --target 9.0
+
+# use the high-speed variant for faster iteration
+python3 autoprompt.py examples/prompt-optimizer/seed.txt \
+  examples/prompt-optimizer/criteria.md \
+  -e minimax -m MiniMax-M2.5-highspeed
+```
+
+No CLI tool installation required — uses Python stdlib only.
 
 ---
 
@@ -144,8 +163,8 @@ python3 autoprompt.py config.yaml criteria.md -e codex
 | `-g, --generations` | Max generations to run | `10` |
 | `-n, --population` | Mutations per generation | `3` |
 | `-b, --bench` | Benchmark command (`{file}` = candidate path) | None |
-| `-e, --engine` | LLM backend: `claude`, `codex`, or `ollama` | `claude` |
-| `-m, --model` | Ollama model name (ignored for claude/codex) | `qwen3.5:9b` |
+| `-e, --engine` | LLM backend: `claude`, `codex`, `ollama`, or `minimax` | `claude` |
+| `-m, --model` | Model name for ollama or minimax | `qwen3.5:9b` / `MiniMax-M2.5` |
 | `--target` | Stop when score reaches this value | None |
 | `--patience` | Stop after N gens with no improvement | None |
 | `--timeout` | Stop after N seconds total | None |
