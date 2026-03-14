@@ -15,6 +15,7 @@ Usage:
 import json
 import sys
 import os
+import re
 import subprocess
 import tempfile
 import time
@@ -24,7 +25,7 @@ from pathlib import Path
 def read(path):
     return Path(path).read_text()
 
-def llm(prompt, engine="claude", reasoning="medium"):
+def llm(prompt, engine="claude", reasoning="medium", model=None):
     """Call an LLM via CLI. Returns raw text response."""
     if engine == "claude":
         env = os.environ.copy()
@@ -44,8 +45,22 @@ def llm(prompt, engine="claude", reasoning="medium"):
         if result.returncode != 0:
             raise RuntimeError(f"codex error: {result.stderr[:200]}")
         return result.stdout.strip()
+    elif engine == "ollama":
+        m = model or "qwen3.5:9b"
+        result = subprocess.run(
+            ["ollama", "run", m, "--nowordwrap", prompt],
+            capture_output=True, text=True, timeout=600
+        )
+        if result.returncode != 0:
+            raise RuntimeError(f"ollama error: {result.stderr[:200]}")
+        out = result.stdout.strip()
+        # strip thinking tags (qwen3.5 uses these)
+        out = re.sub(r'<think>.*?</think>', '', out, flags=re.DOTALL).strip()
+        # strip markdown fences
+        out = re.sub(r'```(?:json)?\s*', '', out).strip()
+        return out
     else:
-        raise ValueError(f"Unknown engine: {engine}")
+        raise ValueError(f"Unknown engine: {engine}. Use: claude, codex, ollama")
 
 def extract_json(text):
     """Extract JSON from LLM response (handles markdown fences etc)."""
@@ -70,7 +85,7 @@ def extract_json(text):
             pass
     raise ValueError(f"Could not extract JSON from response:\n{text[:300]}...")
 
-def mutate(code, criteria, history, n=3, engine="claude", reasoning="medium"):
+def mutate(code, criteria, history, n=3, engine="claude", reasoning="medium", model=None):
     """Generate n mutations of the code using LLM."""
     history_str = ""
     if history:
@@ -101,13 +116,13 @@ Return a JSON array of exactly {n} mutations. Each mutation is an object with:
 
 Return ONLY valid JSON, no markdown fences, no explanation."""
 
-    resp = llm(prompt, engine, reasoning)
+    resp = llm(prompt, engine, reasoning, model)
     result = extract_json(resp)
     if isinstance(result, dict):
         result = [result]
     return result
 
-def judge(code, criteria, bench_result=None, engine="claude", reasoning="medium"):
+def judge(code, criteria, bench_result=None, engine="claude", reasoning="medium", model=None):
     """LLM-as-judge scores a mutation. Returns (score, explanation)."""
     bench_ctx = ""
     if bench_result is not None:
@@ -130,7 +145,7 @@ Return ONLY a JSON object with:
 
 Return ONLY valid JSON, no markdown."""
 
-    resp = llm(prompt, engine, reasoning)
+    resp = llm(prompt, engine, reasoning, model)
     result = extract_json(resp)
     return result["score"], result["explanation"]
 
@@ -156,7 +171,7 @@ def run_bench(code, bench_cmd, timeout=30):
         os.unlink(tmp.name)
 
 def evolve(seed_path, criteria_path, generations=10, population=3, bench_cmd=None,
-           engine="claude", target=None, patience=None, time_budget=None, reasoning="medium"):
+           engine="claude", target=None, patience=None, time_budget=None, reasoning="medium", model=None):
     """Main evolution loop with smart stopping."""
     criteria = read(criteria_path)
     current_code = read(seed_path)
@@ -167,7 +182,8 @@ def evolve(seed_path, criteria_path, generations=10, population=3, bench_cmd=Non
     print(f"{'='*60}")
     print(f"  seed:        {seed_path}")
     print(f"  criteria:    {criteria_path}")
-    print(f"  engine:      {engine}")
+    engine_str = engine if engine != "ollama" else f"ollama ({model or 'qwen3.5:9b'})"
+    print(f"  engine:      {engine_str}")
     print(f"  generations: {generations} max")
     print(f"  population:  {population}/gen")
     if bench_cmd:
@@ -187,7 +203,7 @@ def evolve(seed_path, criteria_path, generations=10, population=3, bench_cmd=Non
     # score the seed
     print("  Scoring seed...", end=" ", flush=True)
     bench_result = run_bench(current_code, bench_cmd)
-    score, explanation = judge(current_code, criteria, bench_result, engine, reasoning)
+    score, explanation = judge(current_code, criteria, bench_result, engine, reasoning, model)
     best_score = score
     best_code = current_code
     history = []
@@ -206,7 +222,7 @@ def evolve(seed_path, criteria_path, generations=10, population=3, bench_cmd=Non
 
         # mutate
         try:
-            mutations = mutate(best_code, criteria, history, n=population, engine=engine, reasoning=reasoning)
+            mutations = mutate(best_code, criteria, history, n=population, engine=engine, reasoning=reasoning, model=model)
         except Exception as e:
             print(f"✗ mutation failed: {e}")
             continue
@@ -222,7 +238,7 @@ def evolve(seed_path, criteria_path, generations=10, population=3, bench_cmd=Non
 
             try:
                 bench_result = run_bench(code, bench_cmd)
-                s, exp = judge(code, criteria, bench_result, engine, reasoning)
+                s, exp = judge(code, criteria, bench_result, engine, reasoning, model)
             except Exception as e:
                 print("✗", end="", flush=True)
                 continue
@@ -290,6 +306,12 @@ examples:
 
   # use codex, stop after plateau
   python3 autoprompt.py prompt.md criteria.md -e codex --patience 3
+
+  # use a local model via ollama
+  python3 autoprompt.py prompt.txt criteria.md -e ollama -m qwen3.5:9b
+
+  # use a small local model for fast iteration
+  python3 autoprompt.py prompt.txt criteria.md -e ollama -m qwen3.5:2b -g 5
 """
     )
     p.add_argument("seed", help="path to the seed file to evolve")
@@ -297,8 +319,10 @@ examples:
     p.add_argument("-g", "--generations", type=int, default=10, help="max generations (default: 10)")
     p.add_argument("-n", "--population", type=int, default=3, help="mutations per generation (default: 3)")
     p.add_argument("-b", "--bench", type=str, default=None, help="benchmark command ({file} = temp file path)")
-    p.add_argument("-e", "--engine", type=str, default="claude", choices=["claude", "codex"],
-                   help="LLM engine: claude or codex (default: claude)")
+    p.add_argument("-e", "--engine", type=str, default="claude", choices=["claude", "codex", "ollama"],
+                   help="LLM engine: claude, codex, or ollama (default: claude)")
+    p.add_argument("-m", "--model", type=str, default=None,
+                   help="model name for ollama (default: qwen3.5:9b). ignored for claude/codex")
     # stopping conditions
     p.add_argument("--target", type=float, default=None, help="stop when score reaches this value")
     p.add_argument("--patience", type=int, default=None, help="stop after N generations with no improvement")
@@ -307,4 +331,4 @@ examples:
                    help="codex reasoning effort: low, medium, high (default: medium)")
     args = p.parse_args()
     evolve(args.seed, args.criteria, args.generations, args.population, args.bench,
-           args.engine, args.target, args.patience, args.timeout, args.reasoning)
+           args.engine, args.target, args.patience, args.timeout, args.reasoning, args.model)

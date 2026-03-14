@@ -32,8 +32,9 @@ You need one of these CLI tools installed:
 
 - [**Claude Code**](https://docs.anthropic.com/en/docs/claude-code) — `claude` CLI
 - [**Codex**](https://github.com/openai/codex) — `codex` CLI
+- [**Ollama**](https://ollama.com/) — run local models (Qwen, Llama, Mistral, etc.)
 
-No API keys needed. No pip install. Just Python 3.10+ and a CLI tool.
+No API keys needed. No pip install. Just Python 3.10+ and an LLM.
 
 ### Run it
 
@@ -53,6 +54,26 @@ python3 autoprompt.py examples/code-optimizer/seed.py \
 ```
 
 That's it. Output lands in `seed_evolved.txt` (or `seed_evolved.py`).
+
+### 🏠 Run with local models (Ollama)
+
+```bash
+# use qwen3.5 (default: 9b)
+python3 autoprompt.py examples/prompt-optimizer/seed.txt \
+  examples/prompt-optimizer/criteria.md \
+  -e ollama --target 9.0
+
+# pick a specific model
+python3 autoprompt.py examples/prompt-optimizer/seed.txt \
+  examples/prompt-optimizer/criteria.md \
+  -e ollama -m qwen3.5:27b
+
+# works with any ollama model
+python3 autoprompt.py seed.txt criteria.md -e ollama -m llama3.2:3b
+python3 autoprompt.py seed.txt criteria.md -e ollama -m qwen2.5-coder:14b
+```
+
+Fully offline. No API keys. No tokens. Just your GPU.
 
 ---
 
@@ -123,7 +144,8 @@ python3 autoprompt.py config.yaml criteria.md -e codex
 | `-g, --generations` | Max generations to run | `10` |
 | `-n, --population` | Mutations per generation | `3` |
 | `-b, --bench` | Benchmark command (`{file}` = candidate path) | None |
-| `-e, --engine` | LLM backend: `claude` or `codex` | `claude` |
+| `-e, --engine` | LLM backend: `claude`, `codex`, or `ollama` | `claude` |
+| `-m, --model` | Ollama model name (ignored for claude/codex) | `qwen3.5:9b` |
 | `--target` | Stop when score reaches this value | None |
 | `--patience` | Stop after N gens with no improvement | None |
 | `--timeout` | Stop after N seconds total | None |

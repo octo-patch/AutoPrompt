@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AutoPrompt Reddit Poster</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: #1a1a2e; color: #e0e0e0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; padding: 40px; min-height: 100vh; }
+  h1 { color: #ff6b35; font-size: 28px; margin-bottom: 8px; }
+  .subtitle { color: #888; margin-bottom: 40px; font-size: 14px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 20px; margin-bottom: 40px; }
+  .card { background: #16213e; border: 1px solid #2a2a4a; border-radius: 12px; padding: 24px; transition: border-color 0.2s; }
+  .card:hover { border-color: #ff6b35; }
+  .card h3 { color: #ff6b35; font-size: 16px; margin-bottom: 4px; }
+  .card .sub { color: #666; font-size: 13px; margin-bottom: 16px; }
+  .buttons { display: flex; gap: 8px; flex-wrap: wrap; }
+  .btn { padding: 8px 16px; border: none; border-radius: 8px; cursor: pointer; font-size: 13px; font-weight: 600; transition: all 0.2s; }
+  .btn-copy-title { background: #2a2a4a; color: #e0e0e0; }
+  .btn-copy-title:hover { background: #3a3a5a; }
+  .btn-copy-body { background: #2a2a4a; color: #e0e0e0; }
+  .btn-copy-body:hover { background: #3a3a5a; }
+  .btn-open { background: #ff6b35; color: #fff; }
+  .btn-open:hover { background: #ff8555; }
+  .btn.copied { background: #2ecc71 !important; color: #fff !important; }
+  .toast { position: fixed; bottom: 30px; right: 30px; background: #2ecc71; color: #fff; padding: 12px 24px; border-radius: 8px; font-weight: 600; opacity: 0; transform: translateY(20px); transition: all 0.3s; pointer-events: none; }
+  .toast.show { opacity: 1; transform: translateY(0); }
+  .preview { margin-top: 30px; background: #16213e; border: 1px solid #2a2a4a; border-radius: 12px; padding: 24px; }
+  .preview h2 { color: #ff6b35; font-size: 18px; margin-bottom: 16px; }
+  .preview h3 { color: #ccc; font-size: 15px; margin-bottom: 12px; }
+  .preview p { color: #aaa; font-size: 14px; line-height: 1.7; white-space: pre-wrap; }
+  .divider { border: none; border-top: 1px solid #2a2a4a; margin: 12px 0; }
+</style>
+</head>
+<body>
+
+<h1>AutoPrompt Reddit Poster</h1>
+<p class="subtitle">Click "Copy Title" or "Copy Body", then "Open" to go to the subreddit submit page.</p>
+
+<div class="grid" id="cards"></div>
+
+<div class="preview">
+  <h2>Post Preview</h2>
+  <h3 id="preview-title"></h3>
+  <hr class="divider">
+  <p id="preview-body"></p>
+</div>
+
+<div class="toast" id="toast">Copied!</div>
+
+<script>
+const TITLE = `What if you treated prompt engineering like genetic algorithms?`;
+
+const BODY = `I was stuck in this loop of tweaking system prompts by hand. Change a word, test it, not quite right, change another word. Over and over. At some point I realized I was basically doing natural selection manually, just very slowly and badly.
+
+That got me thinking. Genetic algorithms work by generating mutations, scoring them against fitness criteria, and keeping the winners. LLMs are actually good at generating intelligent variations of text. So what if you combined the two?
+
+The idea is simple. You start with a seed (any text file, a prompt, code, whatever) and a criteria file that describes what "better" looks like. The LLM generates a few variations, each trying a different strategy. Each one gets scored 0-10 against the criteria. Best one survives, gets fed back in, repeat.
+
+The interesting part is the history. Each generation sees what strategies worked and what flopped in previous rounds, so the mutations get smarter over time instead of being random.
+
+I tried it on a vague "you are a helpful assistant" system prompt. Started at 3.2/10. By generation 5 it had added structured output rules, tone constraints, and edge case handling on its own. Scored 9.2. Most of that stuff I wouldn't have thought to include.
+
+Also works on code. Fed it a bubble sort with fitness criteria for speed and correctness. It evolved into a hybrid quicksort with insertion sort for small partitions. About 50x faster than the seed.
+
+The whole thing is one Python file, ~300 lines, no dependencies. Uses Claude or Codex CLI so no API keys.
+
+I open sourced it here if anyone wants to try it: https://github.com/ranausmanai/AutoPrompt
+
+I'm curious what else this approach would work on. Prompts and code are obvious, but I think regex patterns, SQL queries, even config files could benefit from this kind of iterative optimization. Has anyone tried something similar?`;
+
+const subreddits = [
+  { name: "r/ChatGPTCoding", desc: "Prompt optimization audience", url: "https://www.reddit.com/r/ChatGPTCoding/submit" },
+  { name: "r/SideProject", desc: "Show off what you built", url: "https://www.reddit.com/r/SideProject/submit" },
+  { name: "r/PromptEngineering", desc: "Literally the target audience", url: "https://www.reddit.com/r/PromptEngineering/submit" },
+  { name: "r/LocalLLaMA", desc: "Love minimal, no-API tools", url: "https://www.reddit.com/r/LocalLLaMA/submit" },
+  { name: "r/MachineLearning", desc: "Evolutionary algorithm angle", url: "https://www.reddit.com/r/MachineLearning/submit" },
+  { name: "r/artificial", desc: "General AI audience", url: "https://www.reddit.com/r/artificial/submit" },
+  { name: "r/commandline", desc: "CLI tool, zero deps", url: "https://www.reddit.com/r/commandline/submit" },
+  { name: "r/opensource", desc: "MIT, one file, stdlib only", url: "https://www.reddit.com/r/opensource/submit" },
+  { name: "r/ClaudeAI", desc: "Uses Claude CLI as backend", url: "https://www.reddit.com/r/ClaudeAI/submit" },
+  { name: "r/selfhosted", desc: "Local-first, no API keys", url: "https://www.reddit.com/r/selfhosted/submit" },
+];
+
+// render preview
+document.getElementById('preview-title').textContent = TITLE;
+document.getElementById('preview-body').textContent = BODY;
+
+// render cards
+const grid = document.getElementById('cards');
+subreddits.forEach(sub => {
+  const card = document.createElement('div');
+  card.className = 'card';
+  card.innerHTML = `
+    <h3>${sub.name}</h3>
+    <p class="sub">${sub.desc}</p>
+    <div class="buttons">
+      <button class="btn btn-copy-title" onclick="copyText('title', this)">Copy Title</button>
+      <button class="btn btn-copy-body" onclick="copyText('body', this)">Copy Body</button>
+      <button class="btn btn-open" onclick="window.open('${sub.url}', '_blank')">Open</button>
+    </div>
+  `;
+  grid.appendChild(card);
+});
+
+function copyText(type, btn) {
+  const text = type === 'title' ? TITLE : BODY;
+  const label = type === 'title' ? 'Copy Title' : 'Copy Body';
+  const toastMsg = type === 'title' ? 'Title copied!' : 'Body copied!';
+
+  function onSuccess() {
+    btn.classList.add('copied');
+    btn.textContent = 'Copied!';
+    showToast(toastMsg);
+    setTimeout(() => { btn.classList.remove('copied'); btn.textContent = label; }, 2000);
+  }
+
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text).then(onSuccess).catch(() => fallbackCopy(text, onSuccess));
+  } else {
+    fallbackCopy(text, onSuccess);
+  }
+}
+
+function fallbackCopy(text, cb) {
+  const ta = document.createElement('textarea');
+  ta.value = text;
+  ta.style.position = 'fixed';
+  ta.style.opacity = '0';
+  document.body.appendChild(ta);
+  ta.select();
+  document.execCommand('copy');
+  document.body.removeChild(ta);
+  cb();
+}
+
+function showToast(msg) {
+  const toast = document.getElementById('toast');
+  toast.textContent = msg;
+  toast.classList.add('show');
+  setTimeout(() => toast.classList.remove('show'), 2000);
+}
+</script>
+</body>
+</html>
